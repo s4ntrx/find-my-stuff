@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device map</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<style>
+:root {
+  --surface: #ffffff; --ink: #1c2024; --muted: #5f6872; --line: #e3e6ea; --hover: #f2f4f6;
+  --fresh: #d6372f; --stale: #8b929a; --radius: 10px; --gap: 12px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --surface: #1b1f23; --ink: #eef0f2; --muted: #9aa4af; --line: #2d343b; --hover: #252b31; }
+}
+html, body, #map { height: 100%; margin: 0; }
+.panel {
+  position: absolute; top: var(--gap); left: var(--gap); z-index: 1;
+  width: min(320px, calc(100% - 2 * var(--gap))); max-height: calc(100% - 2 * var(--gap));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+}
+.panel header { display: flex; align-items: center; gap: 4px; padding: 8px 8px 8px var(--gap); }
+.panel h1 { flex: 1; margin: 0; font-size: 1rem; font-weight: 650; }
+.icon-button {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  color: var(--muted); background: none; border: 0; border-radius: 8px; cursor: pointer;
+}
+.icon-button:hover { background: var(--hover); color: var(--ink); }
+.icon-button:focus-visible, .row:focus-visible { outline: 2px solid var(--fresh); outline-offset: 1px; }
+.icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#collapse svg { transition: transform .15s; }
+#collapse[aria-expanded="false"] svg { transform: rotate(180deg); }
+#refresh.busy svg { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #refresh.busy svg, #collapse svg { animation: none; transition: none; } }
+.panel-body { overflow: auto; border-top: 1px solid var(--line); }
+.panel-body[hidden] { display: none; }
+#status { margin: 0; padding: 8px var(--gap); font-size: .8125rem; color: var(--muted); }
+#device-list { list-style: none; margin: 0; padding: 0 8px 8px; }
+.row {
+  display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; width: 100%;
+  padding: 8px; font: inherit; color: inherit; text-align: left; background: none; border: 0; border-radius: 8px; cursor: pointer;
+}
+.row:hover { background: var(--hover); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--stale); }
+.row.fresh .dot { background: var(--fresh); }
+.name { font-weight: 600; }
+.meta { display: flex; align-items: center; gap: 8px; font-size: .8125rem; color: var(--muted); }
+.meta svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; vertical-align: -2px; margin-right: 2px; }
+.pin { width: 28px; height: 28px; color: var(--stale); cursor: pointer; }
+.pin.fresh { color: var(--fresh); }
+.popup-name { font-weight: 650; }
+.popup-line { color: #5f6872; font-size: .8125rem; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<section class="panel" aria-label="Devices">
+  <header>
+    <h1>Devices</h1>
+    <button class="icon-button" id="fit" type="button" title="Fit all devices" aria-label="Fit all devices">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+    <button class="icon-button" id="refresh" type="button" title="Refresh now" aria-label="Refresh now">
+      <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>
+    </button>
+    <button class="icon-button" id="collapse" type="button" aria-expanded="true" aria-controls="panel-body" title="Collapse list" aria-label="Collapse list">
+      <svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>
+    </button>
+  </header>
+  <div class="panel-body" id="panel-body">
+    <p id="status" role="status">Loading devices</p>
+    <ul id="device-list"></ul>
+  </div>
+</section>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+const REPO = "yourusername/your-repo";
+const BRANCH = "main";
+const STALE_MINUTES = 30;
+const REFRESH_MS = 60000;
+const INDEX_URL = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/locations/index.json`;
+
+const BATTERY_ICON = '<svg viewBox="0 0 24 24"><rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2"/></svg>';
+const PIN_ICON = '<svg viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z" fill="currentColor" stroke="#fff" stroke-width="1.5"/><circle cx="12" cy="10" r="2.6" fill="#fff"/></svg>';
+
+const statusLine = document.getElementById("status");
+const deviceList = document.getElementById("device-list");
+const refreshButton = document.getElementById("refresh");
+const collapseButton = document.getElementById("collapse");
+const panelBody = document.getElementById("panel-body");
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+  center: [0, 20],
+  zoom: 1.5,
+  attributionControl: { compact: true },
+});
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+const markers = new Map();
+let devices = [];
+let knownDeviceNames = "";
+
+function formatAge(milliseconds) {
+  const minutes = milliseconds / 60000;
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${Math.round(minutes)}m ago`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h ago`;
+  return `${Math.round(minutes / 1440)}d ago`;
+}
+
+function ageOf(device) {
+  return Date.now() - new Date(device.timestamp).getTime();
+}
+
+function isFresh(device) {
+  return ageOf(device) < STALE_MINUTES * 60000;
+}
+
+function fitAll() {
+  if (!devices.length) return;
+  if (devices.length === 1) {
+    map.flyTo({ center: [devices[0].lon, devices[0].lat], zoom: 13 });
+    return;
+  }
+  const bounds = new maplibregl.LngLatBounds();
+  devices.forEach((device) => bounds.extend([device.lon, device.lat]));
+  map.fitBounds(bounds, { padding: { top: 60, right: 60, bottom: 60, left: 60 }, maxZoom: 14 });
+}
+
+function buildPopup(device) {
+  const node = document.createElement("div");
+  const title = document.createElement("div");
+  title.className = "popup-name";
+  title.textContent = device.device;
+  const line = document.createElement("div");
+  line.className = "popup-line";
+  const accuracy = device.accuracy ? `, accuracy ${device.accuracy} m` : "";
+  line.textContent = `${formatAge(ageOf(device))}${accuracy}`;
+  node.append(title, line);
+  return new maplibregl.Popup({ offset: 24, closeButton: false }).setDOMContent(node);
+}
+
+function renderMarkers() {
+  const names = new Set(devices.map((device) => device.device));
+  for (const [name, marker] of markers) {
+    if (!names.has(name)) { marker.remove(); markers.delete(name); }
+  }
+  for (const device of devices) {
+    let marker = markers.get(device.device);
+    if (!marker) {
+      const element = document.createElement("div");
+      element.className = "pin";
+      element.innerHTML = PIN_ICON;
+      marker = new maplibregl.Marker({ element, anchor: "bottom" }).setLngLat([device.lon, device.lat]).addTo(map);
+      markers.set(device.device, marker);
+    }
+    marker.setLngLat([device.lon, device.lat]).setPopup(buildPopup(device));
+    marker.getElement().classList.toggle("fresh", isFresh(device));
+  }
+}
+
+function renderList() {
+  deviceList.replaceChildren(...devices.map((device) => {
+    const item = document.createElement("li");
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `row${isFresh(device) ? " fresh" : ""}`;
+    const dot = Object.assign(document.createElement("span"), { className: "dot" });
+    const name = Object.assign(document.createElement("span"), { className: "name", textContent: device.device });
+    const meta = Object.assign(document.createElement("span"), { className: "meta" });
+    const age = document.createElement("span");
+    age.textContent = formatAge(ageOf(device));
+    meta.append(age);
+    if (device.battery !== null && device.battery !== undefined) {
+      const battery = document.createElement("span");
+      battery.innerHTML = BATTERY_ICON;
+      battery.append(`${device.battery}%`);
+      meta.append(battery);
+    }
+    row.append(dot, name, meta);
+    row.addEventListener("click", () => {
+      map.flyTo({ center: [device.lon, device.lat], zoom: Math.max(map.getZoom(), 13) });
+      const marker = markers.get(device.device);
+      if (marker && !marker.getPopup().isOpen()) marker.togglePopup();
+    });
+    item.append(row);
+    return item;
+  }));
+}
+
+function render(records) {
+  devices = records
+    .filter((record) => Number.isFinite(record.lat) && Number.isFinite(record.lon) && record.timestamp)
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  renderMarkers();
+  renderList();
+  const names = devices.map((device) => device.device).sort().join(",");
+  if (names !== knownDeviceNames) { knownDeviceNames = names; fitAll(); }
+}
+
+const DEMO = new URLSearchParams(location.search).has("demo");
+
+function demoIndex() {
+  const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60000).toISOString();
+  return {
+    "dev-a": { device: "dev-a", lat: 37.775, lon: -122.419, accuracy: 15, battery: 78, timestamp: minutesAgo(2) },
+    "dev-b": { device: "dev-b", lat: 37.806, lon: -122.271, accuracy: 5000, battery: null, timestamp: minutesAgo(12) },
+    "dev-c": { device: "dev-c", lat: 37.871, lon: -122.273, accuracy: 20, battery: 31, timestamp: minutesAgo(95) },
+  };
+}
+
+async function load() {
+  refreshButton.classList.add("busy");
+  try {
+    if (DEMO) {
+      render(Object.values(demoIndex()));
+      statusLine.textContent = "Demo data. Remove ?demo from the URL to load your repo.";
+      return;
+    }
+    const response = await fetch(`${INDEX_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (response.status === 404) {
+      throw new Error("index.json not found. Check REPO and BRANCH in docs/index.html, make sure the repo is public, and run the aggregate workflow once.");
+    }
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}. Try again in a minute.`);
+    render(Object.values(await response.json()));
+    statusLine.textContent = devices.length
+      ? `Updated ${new Date().toLocaleTimeString()}`
+      : "No devices yet. Run update_location.py on a device, then refresh.";
+  } catch (error) {
+    statusLine.textContent = error instanceof TypeError ? "Network error. Check your connection." : error.message;
+  } finally {
+    refreshButton.classList.remove("busy");
+  }
+}
+
+refreshButton.addEventListener("click", load);
+document.getElementById("fit").addEventListener("click", fitAll);
+collapseButton.addEventListener("click", () => {
+  const expanded = collapseButton.getAttribute("aria-expanded") === "true";
+  collapseButton.setAttribute("aria-expanded", String(!expanded));
+  panelBody.hidden = expanded;
+});
+if (window.matchMedia("(max-width: 600px)").matches) collapseButton.click();
+
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>
