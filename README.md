@@ -8,17 +8,17 @@ Each device pushes a rounded location to `locations/<device>.json` every 5 minut
 
 ```bash
 # 1. Create an empty PUBLIC repo with an opaque name, then:
-git clone https://github.com/yourusername/your-repo.git && cd your-repo
+git clone https://github.com/s4ntrx/find-my-stuff.git && cd find-my-stuff
 # 2. Copy these files in, then: git add -A && git commit -m init && git push
 # 3. Settings > Pages > Deploy from a branch > main > /docs
 # 4. Edit REPO (and BRANCH) near the top of docs/index.html
 # 5. Create a PAT (below), then on every device:
 pip install -r scripts/requirements.txt
-export GH_TOKEN=github_pat_xxx GH_REPO=yourusername/your-repo DEVICE_NAME=dev-a
+export GH_TOKEN=github_pat_xxx GH_REPO=s4ntrx/find-my-stuff DEVICE_NAME=dev-a
 python3 scripts/update_location.py        # first push
 python3 scripts/view_devices.py           # terminal table
 # 6. Actions tab > aggregate > Run workflow (once), then open:
-#    https://yourusername.github.io/your-repo/
+#    https://yourusername.github.io/find-my-stuff
 ```
 
 ## Create the PAT
@@ -34,7 +34,7 @@ python3 scripts/view_devices.py           # terminal table
 | Variable | Meaning | Default |
 |---|---|---|
 | `GH_TOKEN` | fine-grained PAT | required |
-| `GH_REPO` | `yourusername/your-repo` | required |
+| `GH_REPO` | `s4ntrx/find-my-stuff` | required |
 | `GH_BRANCH` | branch to write | `main` |
 | `DEVICE_NAME` | file name, letters/digits/`-`/`_` | hostname |
 | `LOCATION_COMMAND` | shell command printing JSON with `lat`/`lon` or `latitude`/`longitude` (e.g. GPS) | IP lookup via ip-api.com |
@@ -46,12 +46,12 @@ If coordinates are unchanged, the script skips the commit until the entry is 20 
 **Linux / macOS**: `crontab -e`
 
 ```cron
-*/5 * * * * GH_TOKEN=github_pat_xxx GH_REPO=yourusername/your-repo DEVICE_NAME=dev-a /usr/bin/python3 $HOME/your-repo/scripts/update_location.py >> /tmp/location.log 2>&1
+*/5 * * * * GH_TOKEN=github_pat_xxx GH_REPO=s4ntrx/find-my-stuff DEVICE_NAME=dev-a /usr/bin/python3 $HOME/your-repo/scripts/update_location.py >> /tmp/location.log 2>&1
 ```
 
 **Windows**: Task Scheduler. Create Task > Triggers: Daily, repeat every 5 minutes indefinitely > Action: Start a program `cmd` with arguments
-`/c set GH_TOKEN=github_pat_xxx&& set GH_REPO=yourusername/your-repo&& set DEVICE_NAME=dev-b&& python C:\your-repo\scripts\update_location.py`.
-Or in one line: `schtasks /Create /SC MINUTE /MO 5 /TN LocationSync /TR "cmd /c set GH_TOKEN=github_pat_xxx&& set GH_REPO=yourusername/your-repo&& set DEVICE_NAME=dev-b&& python C:\your-repo\scripts\update_location.py"`.
+`/c set GH_TOKEN=github_pat_xxx&& set GH_REPO=s4ntrx/find-my-stuff&& set DEVICE_NAME=dev-b&& python C:\your-repo\scripts\update_location.py`.
+Or in one line: `schtasks /Create /SC MINUTE /MO 5 /TN LocationSync /TR "cmd /c set GH_TOKEN=github_pat_xxx&& set GH_REPO=s4ntrx/find-my-stuff&& set DEVICE_NAME=dev-b&& python C:\your-repo\scripts\update_location.py"`.
 
 **Android (Termux + Termux:API)**
 
@@ -59,7 +59,7 @@ Or in one line: `schtasks /Create /SC MINUTE /MO 5 /TN LocationSync /TR "cmd /c 
 pkg install python termux-api
 cat > ~/loc.sh <<'SH'
 #!/data/data/com.termux/files/usr/bin/sh
-export GH_TOKEN=github_pat_xxx GH_REPO=yourusername/your-repo DEVICE_NAME=phone
+export GH_TOKEN=github_pat_xxx GH_REPO=s4ntrx/find-my-stuff DEVICE_NAME=phone
 export LOCATION_COMMAND="termux-location -p gps -r once"
 python $HOME/your-repo/scripts/update_location.py
 SH
@@ -69,7 +69,7 @@ termux-job-scheduler --script ~/loc.sh --period-ms 900000
 
 Android's job scheduler will not run periodic jobs more often than every 15 minutes, so that is the real cadence. For a true 5-minute loop, run `pkg install cronie termux-services`, `sv-enable crond`, add `*/5 * * * * ~/loc.sh` via `crontab -e`, and keep `termux-wake-lock` active. Expect battery cost.
 
-**iOS (Shortcuts, fragile)**: Get Current Location > Round to 3 decimals > Dictionary `{device, lat, lon, accuracy, battery, timestamp}` > Get Contents of URL `GET https://api.github.com/repos/yourusername/your-repo/contents/locations/phone.json` (headers `Authorization: Bearer github_pat_xxx`) > read `sha` > Base64 Encode the JSON > Get Contents of URL `PUT` same URL with JSON body `{message, content, sha}`. Personal Automations cannot repeat every 5 minutes; expect hourly or event-based runs at best.
+**iOS (Shortcuts, fragile)**: Get Current Location > Round to 3 decimals > Dictionary `{device, lat, lon, accuracy, battery, timestamp}` > Get Contents of URL `GET https://api.github.com/repos/s4ntrx/find-my-stuff/contents/locations/phone.json` (headers `Authorization: Bearer github_pat_xxx`) > read `sha` > Base64 Encode the JSON > Get Contents of URL `PUT` same URL with JSON body `{message, content, sha}`. Personal Automations cannot repeat every 5 minutes; expect hourly or event-based runs at best.
 
 ## Housekeeping
 
